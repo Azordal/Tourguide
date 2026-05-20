@@ -1,8 +1,10 @@
 package com.openclassrooms.tourguide.service;
 
+import com.openclassrooms.tourguide.dto.NearbyAttractionDTO;
 import com.openclassrooms.tourguide.helper.InternalTestHelper;
 import com.openclassrooms.tourguide.tracker.Tracker;
 import com.openclassrooms.tourguide.user.User;
+import com.openclassrooms.tourguide.user.UserReward;
 
 import gpsUtil.GpsUtil;
 import gpsUtil.location.Attraction;
@@ -59,23 +61,21 @@ public class TourGuideService {
 		addShutDownHook();
 	}
 
-	public List getUserRewards(User user) {
+	public List<UserReward> getUserRewards(User user) {
 		return user.getUserRewards();
 	}
 
 	public VisitedLocation getUserLocation(User user) {
-		VisitedLocation visitedLocation = (user.getVisitedLocations().size() > 0)
+		return user.getVisitedLocations().size() > 0
 				? user.getLastVisitedLocation()
 				: trackUserLocation(user);
-
-		return visitedLocation;
 	}
 
 	public User getUser(String userName) {
 		return internalUserMap.get(userName);
 	}
 
-	public List getAllUsers() {
+	public List<User> getAllUsers() {
 		return internalUserMap.values()
 				.stream()
 				.collect(Collectors.toList());
@@ -87,19 +87,19 @@ public class TourGuideService {
 		}
 	}
 
-	public List getTripDeals(User user) {
-		int cumulatativeRewardPoints = user.getUserRewards()
+	public List<Provider> getTripDeals(User user) {
+		int cumulativeRewardPoints = user.getUserRewards()
 				.stream()
-				.mapToInt(i -> i.getRewardPoints())
+				.mapToInt(UserReward::getRewardPoints)
 				.sum();
 
-		List providers = tripPricer.getPrice(
+		List<Provider> providers = tripPricer.getPrice(
 				tripPricerApiKey,
 				user.getUserId(),
 				user.getUserPreferences().getNumberOfAdults(),
 				user.getUserPreferences().getNumberOfChildren(),
 				user.getUserPreferences().getTripDuration(),
-				cumulatativeRewardPoints
+				cumulativeRewardPoints
 		);
 
 		user.setTripDeals(providers);
@@ -117,7 +117,7 @@ public class TourGuideService {
 		return visitedLocation;
 	}
 
-	public List getNearByAttractions(VisitedLocation visitedLocation) {
+	public List<Attraction> getNearByAttractions(VisitedLocation visitedLocation) {
 		return gpsUtil.getAttractions()
 				.stream()
 				.sorted(Comparator.comparingDouble(
@@ -125,6 +125,28 @@ public class TourGuideService {
 				))
 				.limit(5)
 				.collect(Collectors.toList());
+	}
+
+	public List<NearbyAttractionDTO> getNearbyAttractionsWithDetails(VisitedLocation visitedLocation) {
+		return getNearByAttractions(visitedLocation)
+				.stream()
+				.map(attraction -> buildNearbyAttractionDTO(attraction, visitedLocation))
+				.collect(Collectors.toList());
+	}
+
+	private NearbyAttractionDTO buildNearbyAttractionDTO(Attraction attraction, VisitedLocation visitedLocation) {
+		double distance = rewardsService.getDistance(attraction, visitedLocation.location);
+		int rewardPoints = rewardsService.getRewardPoints(attraction.attractionId, visitedLocation.userId);
+
+		return new NearbyAttractionDTO(
+				attraction.attractionName,
+				attraction.latitude,
+				attraction.longitude,
+				visitedLocation.location.latitude,
+				visitedLocation.location.longitude,
+				distance,
+				rewardPoints
+		);
 	}
 
 	private void addShutDownHook() {
