@@ -28,6 +28,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -115,6 +118,23 @@ public class TourGuideService {
 		rewardsService.calculateRewards(user);
 
 		return visitedLocation;
+	}
+
+	public List<VisitedLocation> trackAllUserLocations(List<User> users) {
+		int threadPoolSize = Math.max(1, Runtime.getRuntime().availableProcessors() * 2);
+		ExecutorService executorService = Executors.newFixedThreadPool(threadPoolSize);
+
+		try {
+			List<CompletableFuture<VisitedLocation>> futures = users.stream()
+					.map(user -> CompletableFuture.supplyAsync(() -> trackUserLocation(user), executorService))
+					.collect(Collectors.toList());
+
+			return futures.stream()
+					.map(CompletableFuture::join)
+					.collect(Collectors.toList());
+		} finally {
+			executorService.shutdown();
+		}
 	}
 
 	public List<Attraction> getNearByAttractions(VisitedLocation visitedLocation) {
