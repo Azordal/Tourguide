@@ -1,7 +1,13 @@
 package com.openclassrooms.tourguide.service;
 
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 
@@ -43,20 +49,50 @@ public class RewardsService {
 		List<VisitedLocation> userLocations = user.getVisitedLocations();
 		List<Attraction> attractions = gpsUtil.getAttractions();
 
-		for (VisitedLocation visitedLocation : userLocations) {
-			for (Attraction attraction : attractions) {
-				boolean alreadyRewarded = user.getUserRewards()
-						.stream()
-						.anyMatch(reward -> reward.attraction.attractionName.equals(attraction.attractionName));
+		Set<String> rewardedAttractionNames = user.getUserRewards()
+				.stream()
+				.map(userReward -> userReward.attraction.attractionName)
+				.collect(Collectors.toSet());
 
-				if (!alreadyRewarded && nearAttraction(visitedLocation, attraction)) {
+		for (Attraction attraction : attractions) {
+			if (!rewardedAttractionNames.contains(attraction.attractionName)) {
+				Optional<VisitedLocation> matchingVisitedLocation = userLocations
+						.stream()
+						.filter(visitedLocation -> nearAttraction(visitedLocation, attraction))
+						.findFirst();
+
+				if (matchingVisitedLocation.isPresent()) {
 					user.addUserReward(new UserReward(
-							visitedLocation,
+							matchingVisitedLocation.get(),
 							attraction,
 							getRewardPoints(attraction.attractionId, user.getUserId())
 					));
+
+					rewardedAttractionNames.add(attraction.attractionName);
 				}
 			}
+		}
+	}
+
+	public void calculateRewardsForAllUsers(List<User> users) {
+		int threadPoolSize = Math.min(
+				100,
+				Math.max(10, Runtime.getRuntime().availableProcessors() * 4)
+		);
+
+		ExecutorService executorService = Executors.newFixedThreadPool(threadPoolSize);
+
+		try {
+			List<CompletableFuture<Void>> futures = users.stream()
+					.map(user -> CompletableFuture.runAsync(
+							() -> calculateRewards(user),
+							executorService
+					))
+					.collect(Collectors.toList());
+
+			CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+		} finally {
+			executorService.shutdown();
 		}
 	}
 
